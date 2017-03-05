@@ -18,8 +18,6 @@ use strict;
 use warnings;
 use utf8;
 
-use Class::Accessor "antlers";
-
 use FindBin qw($Bin);
 use File::Basename qw(dirname);
 use JSON::PP qw(decode_json);
@@ -28,10 +26,45 @@ use File::Find qw(find);
 
 use constant SITES_SCHEMA => dirname($Bin) . "/sites-schema/sites-schema.json";
 
-# Attributes for constructor
-has config_data_file => ( is => "ro" );
+# Attributes
+my $class_attributes = {
+	config_data_file => 'ro',
+	config_data => 'ro'
+};
 
-sub prepare {
+# Constructor
+sub new {
+	my ( $class, $attrs ) = @_;
+	$attrs = $attrs || {};
+	my $self = bless {
+		map { $_ => $attrs->{$_} } keys %$class_attributes
+	}, $class;
+	_prepare ( $self );
+	return $self;
+}
+
+# Getter
+sub get {
+	my ( $self, $attr ) = @_;
+	if ( defined $class_attributes->{$attr} && $class_attributes->{$attr} =~ /^(?:ro|rw)$/ ) {
+		return $self->{$attr};
+	} else {
+		die "Attempt to get unknown attribute: $attr"
+	}
+}
+
+# Setter
+sub set {
+	my ( $self, $attr, $value ) = @_;
+	if ( $class_attributes->{$attr} eq 'rw' ) {
+		$self->{$attr} = $value;
+	} else {
+		die "Attempt to write to non-writable attribute: $attr"
+	}
+	return $self->{$attr};
+}
+
+sub _prepare {
 	my $self = shift;
 	
 	# Get the config data

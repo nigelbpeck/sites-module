@@ -18,8 +18,6 @@ use strict;
 use warnings;
 use utf8;
 
-use Class::Accessor "antlers";
-
 use File::Find qw(find);
 
 # Subclass of Sites
@@ -41,8 +39,9 @@ sub process_directories {
 }
 
 sub is_valid_site_dir {
-	my ( $self ) = @_;
+	my ( $self, $site_dir ) = @_;
 	
+	return defined $self->{'config_data'}{'sites'}{$site_dir};
 }
 
 sub process_site_directory {
