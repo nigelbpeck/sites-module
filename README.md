@@ -4,8 +4,7 @@ A Perl module for processing web sites configured using Sites Schema.
 
 ## Sites Schema
 
-You can find the sister project to Sites Module, Sites Schema, on GitHub at:
-https://github.com/sharphosting/sites-schema
+You can find the sister project to Sites Module, Sites Schema, [on GitHub](https://github.com/sharphosting/sites-schema).
 
 ## 5 March 2017
 
