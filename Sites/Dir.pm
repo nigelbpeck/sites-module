@@ -25,13 +25,35 @@ use File::Find qw(find);
 # Subclass of Sites
 use parent 'Sites';
 
+sub prepare_report {
+	my ( $self ) = @_;
+	
+}
+
+sub take_actions {
+	my ( $self ) = @_;
+	
+}
+
+sub process_directories {
+	my ( $self ) = @_;
+	
+}
+
+sub is_valid_site_dir {
+	my ( $self ) = @_;
+	
+}
+
 sub process_site_directory {
-	my ( $self, $config_data, $site_dir ) = @_;
+	my ( $self, $site_dir ) = @_;
 	my $report = '';
 	# Easy access to config
+	my $config_data = $self->{'config_data'};
 	my $sites_config = $config_data->{'sites'};
-	my $site_config = $sites_config->{$site_dir};
 	my $directory_structure = $config_data->{'directory_structure'};
+	# The site we are processing
+	my $site_config = $sites_config->{$site_dir};
 	# Check that only (potentially) allowed entries exist in root site folder
 	opendir(my $dh, $site_dir) or die "Can't opendir $site_dir: $!";
 	while ( readdir($dh) ) {
