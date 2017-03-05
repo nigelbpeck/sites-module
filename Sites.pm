@@ -26,9 +26,10 @@ use JSON::PP qw(decode_json);
 use JSON::Validator qw();
 use File::Find qw(find);
 
-has config_data_file => ( is => "ro" );
+use constant SITES_SCHEMA => dirname($Bin) . "/sites-schema/sites-schema.json";
 
-my $sites_schema = dirname($Bin) . "/sites-schema/sites-schema.json";
+# Attributes for constructor
+has config_data_file => ( is => "ro" );
 
 sub prepare {
 	my $self = shift;
@@ -42,7 +43,7 @@ sub prepare {
 	# Validate the config data
 	{
 		my $validator = JSON::Validator->new;
-		$validator->schema($sites_schema);
+		$validator->schema(SITES_SCHEMA);
 		my @errors = $validator->validate($self->{'config_data'});
 		if ( @errors ) {
 			my $error;
