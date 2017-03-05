@@ -20,8 +20,6 @@ use utf8;
 
 use Class::Accessor "antlers";
 
-has name => ( is => "rw" );
-
-
+use parent 'Sites';
 
 'and they all lived happily ever after';
