@@ -18,7 +18,7 @@ use strict;
 use warnings;
 use utf8;
 
-use File::Find qw(find);
+use File::Find qw(finddepth);
 
 # Subclass of Sites
 use parent 'Sites';
@@ -259,7 +259,7 @@ sub process_site_directory {
 # in a directory. Error if anything else is found.
 sub _check_folder {
 	my ( $folder, $callbacks, $sub_directories, $sub_files ) = @_;
-	find ( sub {
+	finddepth ( sub {
 		if ( -d $File::Find::name ) {
 			&$sub_directories ( $File::Find::name );
 		} elsif ( -f $File::Find::name ) {
