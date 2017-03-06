@@ -23,9 +23,50 @@ use File::Find qw(find);
 # Subclass of Sites
 use parent 'Sites';
 
-sub prepare_report {
+sub is_valid_site_dir {
+	my ( $self, $site_dir ) = @_;
+	return defined $self->{'config_data'}{'sites'}{$site_dir};
+}
+
+sub prepare_directory_reports {
 	my ( $self ) = @_;
-	
+	my $report = '';
+	foreach my $site_dir (sort keys %{$self->{'config_data'}{'sites'}}) {
+		$report .= prepare_directory_report ( $self, $site_dir );
+	}
+	return $report;
+}
+
+sub prepare_directory_report {
+	my ( $self, $site_dir ) = @_;
+	my $report;
+	process_site_directory ( $self, $site_dir, {
+		missing_optional_dir => sub {
+			$report .= "$_[0]: optional directory should be provided but isn't\n";
+		},
+		unspecified_optional_dir => sub {
+			$report .= "$_[0]: optional directory shouldn't be provided but is (no further checking done on it)\n";
+		},
+		missing_required_dir => sub {
+			$report .= "$_[0]: required directory does not exist\n";
+		},
+		user_error => sub {
+			$report .= "$_[0]: not owned by $_[1] ($_[2] -> $_[3])\n";
+		},
+		group_error => sub {
+			$report .= "$_[0]: group not set to $_[1] ($_[2] -> $_[3])\n";
+		},
+		mode_error => sub {
+			$report .= "$_[0]: mode is not $_[1] ($_[2])\n";
+		},
+		unknown_entry => sub {
+			$report .= "$_[0]: neither file or directory, and nothing else allowed\n";
+		},
+		unknown_root_entry => sub {
+			$report .= "$_[0]: rogue entry found in site root\n";
+		},
+	});
+	return $report;
 }
 
 sub take_actions {
@@ -33,23 +74,8 @@ sub take_actions {
 	
 }
 
-sub is_valid_site_dir {
-	my ( $self, $site_dir ) = @_;
-	return defined $self->{'config_data'}{'sites'}{$site_dir};
-}
-
-sub process_site_directories {
-	my ( $self ) = @_;
-	my $report = '';
-	foreach my $site_dir (sort keys %{$self->{'config_data'}{'sites'}}) {
-		$report .= process_site_directory ( $self, $site_dir );
-	}
-	return $report;
-}
-
 sub process_site_directory {
-	my ( $self, $site_dir ) = @_;
-	my $report = '';
+	my ( $self, $site_dir, $callbacks ) = @_;
 	# Easy access to config
 	my $config_data = $self->{'config_data'};
 	my $sites_config = $config_data->{'sites'};
@@ -59,7 +85,7 @@ sub process_site_directory {
 	# Check that only (potentially) allowed entries exist in root site folder
 	opendir(my $dh, $site_dir) or die "Can't opendir $site_dir: $!";
 	while ( readdir($dh) ) {
-		$report .= "$site_dir: rogue entry found: '$_'\n"
+		&{$callbacks->{'unknown_root_entry'}}("$site_dir/$_")
 			unless ( $directory_structure->{'directories'}{$_} or /^(?:\.{1,2})$/ );
 	}
 	closedir $dh;
@@ -71,7 +97,7 @@ sub process_site_directory {
 		group => $directory_structure->{'group'},
 	};
 	# Check root folder
-	$report .= _check_entity ( $config_data, $site_dir, $site_dir, $root_dir_config );
+	_check_entity ( $config_data, $callbacks, $site_dir, $site_dir, $root_dir_config );
 	# Check each directory
 	foreach my $directory ( sort keys %{$directory_structure->{'directories'}} ) {
 		my $directory_path = "$site_dir/$directory";
@@ -96,18 +122,18 @@ sub process_site_directory {
 			}
 			# Check the status of the optional directory is valid
 			if ( $provided and not -d $directory_path ) {
-				$report .= "$directory_path: optional directory should be provided but isn't\n";
+				&{$callbacks->{'missing_optional_dir'}}($directory_path);
 				next;
 			} elsif ( not $provided and -d $directory_path ) {
-				$report .= "$directory_path: optional directory shouldn't be provided but is (no further checking done on it)\n";
+				&{$callbacks->{'unspecified_optional_dir'}}($directory_path);
 				next;
-			# If not provided, skip it
+			# If not provided, go to next directory
 			} elsif ( not $provided ) {
 				next;
 			}
 		# Review required directories
 		} elsif ( not -d $directory_path ) {
-			$report .= "$directory_path: required directory does not exist\n";
+			&{$callbacks->{'missing_required_dir'}}($directory_path);
 			next;
 		}
 		# Shorthand for the directory's config
@@ -152,76 +178,72 @@ sub process_site_directory {
 				};
 		}
 		# Check the entire directory
-		$report .= _check_folder ( $directory_path, sub {
+		_check_folder ( $directory_path, $callbacks, sub {
 			# Directories
 			my $this_dir = shift;
 			# Check the top level directory
 			if ( $this_dir eq $directory_path ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_dir, $top_level_dir_config );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $top_level_dir_config );
 			# Within the .git directory, check ownership only
 			} elsif ( $directory_config->{'allow_specials'} and $this_dir =~ m!^$directory_path/\.git(?:$|/)! ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_dir, $internal_dir_config, { do_not_check_mode => 1 } );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { do_not_check_mode => 1 } );
 			# Open folders for site
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_config->{'open_folders'} ) ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
 			# Open folders for site type
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $config_data->{'site_types'}{$site_config->{'type'}}{'open_folders'} ) ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
 			# Everything else
 			} else {
-				$report .= _check_entity ( $config_data, $site_dir, $this_dir, $internal_dir_config );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config );
 			}
 		}, sub {
 			# Files
 			my $this_file = shift;
 			# Within the .git directory, check ownership only
 			if ( $directory_config->{'allow_specials'} and $this_file =~ m!^$directory_path/\.git(?:$|/)! ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_file, $internal_dir_config, { do_not_check_mode => 1 } );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { do_not_check_mode => 1 } );
 			# Server files
 			# (check these first as they can be in open folders)
 			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_config->{'server_files'} ) ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_file, $internal_dir_config, { f_mode => '0644', user => '[web_server]', group => '[web_server]' } );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0644', user => '[web_server]', group => '[web_server]' } );
 			# Open folders for site
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_config->{'open_folders'} ) ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
 			# Open folders for site type
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $config_data->{'site_types'}{$site_config->{'type'}}{'open_folders'} ) ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
 			# Read only files for site
 			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_config->{'read_only'} ) ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
 			# Read only files for site type
 			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $config_data->{'site_types'}{$site_config->{'type'}}{'read_only'} ) ) {
-				$report .= _check_entity ( $config_data, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
 			# Everything else
 			} else {
-				$report .= _check_entity ( $config_data, $site_dir, $this_file, $internal_dir_config );
+				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config );
 			}
 		});
 	}
-	return $report;
 }
 
 # Take callbacks to recursively process all files and directories
 # in a directory. Error if anything else is found.
 sub _check_folder {
-	my ( $folder, $sub_directories, $sub_files ) = @_;
-	my $report = '';
+	my ( $folder, $callbacks, $sub_directories, $sub_files ) = @_;
 	find ( sub {
 		if ( -d $File::Find::name ) {
 			&$sub_directories ( $File::Find::name );
 		} elsif ( -f $File::Find::name ) {
 			&$sub_files ( $File::Find::name );
 		} else {
-			$report .= $File::Find::name . ": neither file or directory, and nothing else allowed\n";
+			&{$callbacks->{'unknown_entry'}}($File::Find::name);
 		}
 	}, $folder );
-	return $report;
 }
 
 sub _check_entity {
-	my ( $config_data, $site, $entity, $dir_config, $options ) = @_;
-	my $report = '';
+	my ( $config_data, $callbacks, $site, $entity, $dir_config, $options ) = @_;
 	$options = $options || {};
 	# Get ready, we're hitting the town
 	my $sites_config = $config_data->{'sites'};
@@ -288,18 +310,17 @@ sub _check_entity {
 	unless ( $options->{'do_not_check_mode'} ) {
 		$mode = sprintf '%04o', $mode & 07777;
 		if ( $mode ne $check_mode ) {
-			$report .= "$entity: mode is not $check_mode ($mode)\n";
+			&{$callbacks->{'mode_error'}}($entity, $check_mode, $mode);
 		}
 	}
 	# Check the uid
 	if ( $uid != $check_uid ) {
-		$report .= "$entity: not owned by $username_for_error ($uid -> $check_uid)\n";
+		&{$callbacks->{'user_error'}}($entity, $username_for_error, $check_uid, $uid);
 	}
 	# Check the gid
 	if ( $gid != $check_gid ) {
-		$report .= "$entity: group not set to $group_for_error ($gid -> $check_gid)\n";
+		&{$callbacks->{'group_error'}}($entity, $group_for_error, $check_gid, $gid);
 	}
-	return $report;
 }
 
 {
