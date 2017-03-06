@@ -33,15 +33,18 @@ sub take_actions {
 	
 }
 
-sub process_directories {
-	my ( $self ) = @_;
-	
-}
-
 sub is_valid_site_dir {
 	my ( $self, $site_dir ) = @_;
-	
 	return defined $self->{'config_data'}{'sites'}{$site_dir};
+}
+
+sub process_site_directories {
+	my ( $self ) = @_;
+	my $report = '';
+	foreach my $site_dir (sort keys %{$self->{'config_data'}{'sites'}}) {
+		$report .= process_site_directory ( $self, $site_dir );
+	}
+	return $report;
 }
 
 sub process_site_directory {
