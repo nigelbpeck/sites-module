@@ -76,6 +76,34 @@ sub take_actions {
 
 sub process_site_directory {
 	my ( $self, $site_dir, $callbacks ) = @_;
+	# Check the callbacks
+	die "Callbacks must be provided for this method to operate"
+		unless ref $callbacks eq 'HASH';
+	# Process callbacks
+	{
+		my $count = 0;
+		foreach ( qw(
+			missing_optional_dir
+			unspecified_optional_dir
+			missing_required_dir
+			user_error
+			group_error
+			mode_error
+			unknown_entry
+			unknown_root_entry
+		) ) {
+			if ( ref $callbacks->{$_} eq 'CODE' ) {
+				# Keep a count of provided callbacks
+				$count++;
+			} else {
+				# Fill out any empty callbacks
+				$callbacks->{$_} = sub{}
+			}
+		};
+		# Error if no callbacks were provided
+		die "No callbacks provided, this method needs callbacks to operate"
+			unless $count;
+	}
 	# Easy access to config
 	my $config_data = $self->{'config_data'};
 	my $sites_config = $config_data->{'sites'};
@@ -248,6 +276,11 @@ sub _check_entity {
 	# Get ready, we're hitting the town
 	my $sites_config = $config_data->{'sites'};
 	my ( $check_mode, $check_uid, $check_gid, $username_for_error, $group_for_error );
+	# Make sure this is a file or a directory
+	if ( not -d $entity and not -f $entity ) {
+		&{$callbacks->{'unknown_entry'}}($entity);
+		return;
+	}
 	# Get the mode to check, unless mode checking is disabled
 	unless ( $options->{'do_not_check_mode'} ) {
 		# Get the mode for the type of entity we're looking at
@@ -259,13 +292,11 @@ sub _check_entity {
 			$check_mode = $options->{'f_mode'}
 				? $options->{'f_mode'}
 				: $dir_config->{'f_mode'};
-		} else {
-			die "$entity: check_entity only checks directories or files, this is neither"
 		}
 		# Check the mode is valid
 		if ( $check_mode ) {
-			_validate_mode ( $check_mode )
-				or die "$entity: failed to validate mode '$check_mode'";
+			$check_mode =~ /^[0-7]{4}$/
+				or die "$entity: failed to validate check mode '$check_mode'";
 		}
 	}
 	# Retrieve the user value and convert to a uid
@@ -376,10 +407,6 @@ sub _file_is_listed {
 		return 1 if $file eq "${root_folder}$_";
 	}
 	return 0;
-}
-
-sub _validate_mode {
-	$_[0] =~ /^[0-7]{4}$/;
 }
 
 'and they all lived happily ever after';
