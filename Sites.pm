@@ -25,6 +25,7 @@ use JSON::Validator qw();
 use File::Find qw(find);
 
 use constant SITES_SCHEMA => dirname($Bin) . "/sites-schema/sites-schema.json";
+use constant DEFAULT_CONFIG_DATA_FILE => "/etc/sites/sites.json";
 
 # Attributes
 my $class_attributes = {
@@ -32,12 +33,21 @@ my $class_attributes = {
 	config_data => 'ro'
 };
 
+# Attribute defaults
+my $class_attribute_defaults = {
+	config_data_file => DEFAULT_CONFIG_DATA_FILE
+};
+
 # Constructor
 sub new {
 	my ( $class, $attrs ) = @_;
 	$attrs = $attrs || {};
 	my $self = bless {
-		map { $_ => $attrs->{$_} } keys %$class_attributes
+		map {
+			$_ => defined $attrs->{$_}
+				? $attrs->{$_}
+				: $class_attribute_defaults->{$_}
+		} keys %$class_attributes
 	}, $class;
 	_prepare ( $self );
 	return $self;
@@ -66,13 +76,10 @@ sub set {
 
 sub _prepare {
 	my $self = shift;
-	
 	# Get the config data
 	my $sites_json = _slurp_file ( $self->{'config_data_file'} );
-	
 	# Parse the config data
 	$self->{'config_data'} = decode_json ( $sites_json );
-	
 	# Validate the config data
 	{
 		my $validator = JSON::Validator->new;
