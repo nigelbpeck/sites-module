@@ -291,12 +291,12 @@ sub process_site_directory {
 			if ( $this_dir eq $directory_path ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $top_level_dir_config );
 			# Only check ownership for "ignore_permissions" matches
-			} elsif ( $directory_config->{'allow_specials'} and _is_ignore_permissions ( $site_config, $site_dir, $this_dir ) ) {
+			} elsif ( $directory_config->{'allow_specials'} and _should_ignore_permissions ( $site_config, $site_dir, $this_dir ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { do_not_check_mode => 1 } );
-			# Open folders for site
+			# World writable dirs for site
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_config->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
-			# Open folders for site type
+			# World writable dirs for site type
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_type->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
 			# Everything else
@@ -307,7 +307,7 @@ sub process_site_directory {
 			# Files
 			my $this_file = shift;
 			# Only check ownership for "ignore_permissions" matches
-			if ( $directory_config->{'allow_specials'} and _is_ignore_permissions ( $site_config, $site_dir, $this_file ) ) {
+			if ( $directory_config->{'allow_specials'} and _should_ignore_permissions ( $site_config, $site_dir, $this_file ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { do_not_check_mode => 1 } );
 			# Server owned files
 			# (check these first as they can be in world writable dirs)
@@ -459,7 +459,7 @@ sub _prune_temp_directory {
 	}, $directory );
 }
 
-sub _is_ignore_permissions {
+sub _should_ignore_permissions {
 	my ( $site_config, $site_dir, $entity ) = @_;
 	foreach my $ignore_permissions ( @{$site_config->{'ignore_permissions'}} ) {
 		# Directory match specified
