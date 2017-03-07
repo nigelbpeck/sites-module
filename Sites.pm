@@ -18,13 +18,13 @@ use strict;
 use warnings;
 use utf8;
 
-use FindBin qw($Bin);
+use FindBin qw($RealBin);
 use File::Basename qw(dirname);
 use JSON::PP qw(decode_json);
 use JSON::Validator qw();
 use File::Find qw(find);
 
-use constant SITES_SCHEMA => dirname($Bin) . "/sites-schema/sites-schema.json";
+use constant SITES_SCHEMA => dirname($RealBin) . "/sites-schema/sites-schema.json";
 use constant DEFAULT_CONFIG_DATA_FILE => "/etc/sites/sites.json";
 
 # Attributes
