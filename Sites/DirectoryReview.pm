@@ -56,7 +56,7 @@ sub lock_down_directories {
 
 sub prepare_directory_report {
 	my ( $self, $site_dir ) = @_;
-	my $report;
+	my $report = '';
 	process_site_directory ( $self, $site_dir, {
 		missing_optional_dir => sub {
 			$report .= "$_[0]: optional directory should be provided but isn't\n";
@@ -91,7 +91,7 @@ sub prepare_directory_report {
 
 sub lock_down_directory {
 	my ( $self, $site_dir ) = @_;
-	my $report;
+	my $report = '';
 	process_site_directory ( $self, $site_dir, {
 		missing_optional_dir => sub {
 			$report .= "$_[0]: optional directory should be provided but isn't\n";
