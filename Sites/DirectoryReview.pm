@@ -29,8 +29,8 @@ sub is_valid_site_dir {
 }
 
 sub is_within_a_specials_dir {
-	my ( $self, $keep_empty ) = @_;
-	$keep_empty =~ m!^/([^/]+)/!;
+	my ( $self, $temp_dirs ) = @_;
+	$temp_dirs =~ m!^/([^/]+)/!;
 	return $self->{'config_data'}{'directory_structure'}{'directories'}{$1}{'allow_specials'}
 		? 1
 		: 0;
@@ -82,8 +82,8 @@ sub prepare_directory_report {
 		unknown_root_entry => sub {
 			$report .= "$_[0]: rogue entry found in site root\n";
 		},
-		keep_empty_deleted => sub {
-			$report .= "$_[0]: deleted from \"keep empty\" folder\n";
+		temp_dir_item_deleted => sub {
+			$report .= "$_[0]: deleted from temp dir\n";
 		},
 	});
 	return $report;
@@ -122,8 +122,8 @@ sub lock_down_directory {
 		unknown_root_entry => sub {
 			$report .= "$_[0]: rogue entry found in site root\n";
 		},
-		keep_empty_deleted => sub {
-			$report .= "$_[0]: deleted from \"keep empty\" folder\n";
+		temp_dir_item_deleted => sub {
+			$report .= "$_[0]: deleted from temp dir\n";
 		},
 	});
 	return $report;
@@ -156,7 +156,7 @@ sub process_site_directory {
 			mode_error
 			unknown_entry
 			unknown_root_entry
-			keep_empty_deleted
+			temp_dir_item_deleted
 		) ) {
 			if ( ref $callbacks->{$_} eq 'CODE' ) {
 				# Keep a count of provided callbacks
@@ -177,22 +177,22 @@ sub process_site_directory {
 			unless ( $directory_structure->{'directories'}{$_} or /^(?:\.{1,2})$/ );
 	}
 	closedir $dh;
-	# Process any "keep_empty" directories for the site type
+	# Process any temp directories for the site type
 	# Delete any files more than a day old from them
 	# Delete any empty directories
-	if ( ref $site_type->{'keep_empty'} eq 'ARRAY' ) {
-		foreach my $keep_empty ( @{$site_type->{'keep_empty'}} ) {
+	if ( ref $site_type->{'temp_dirs'} eq 'ARRAY' ) {
+		foreach my $temp_dir ( @{$site_type->{'temp_dirs'}} ) {
 			# Check that it is within a directory that allows specials
-			die ( "$site_dir does not allow_specials for $keep_empty" )
-				unless is_within_a_specials_dir ( $self, $keep_empty );
+			die ( "$site_dir does not allow_specials for $temp_dir" )
+				unless is_within_a_specials_dir ( $self, $temp_dir );
 			# Shortcut for processing
-			my $keep_empty_dir = "$site_dir$keep_empty";
+			my $temp_dir_path = "$site_dir$temp_dir";
 			# Check carefully before deleting things
 			# Must be 3 levels deep
-			$keep_empty_dir =~ /^(\/[^\/]+){3,}$/
-				or die "Unsafe value found for keep_empty directory: '$keep_empty_dir'; refusing to 'find $keep_empty_dir -mindepth 1 -atime 1 -delete'";
+			$temp_dir_path =~ /^(\/[^\/]+){3,}$/
+				or die "Unsafe value found for temp directory: '$temp_dir_path'; refusing to delete from it";
 			# Carry out the deletions and report them
-			_keep_directory_empty ( $keep_empty_dir, $callbacks );
+			_prune_temp_directory ( $temp_dir_path, $callbacks );
 		}
 	}
 	# Get root dir config
@@ -290,14 +290,14 @@ sub process_site_directory {
 			# Check the top level directory
 			if ( $this_dir eq $directory_path ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $top_level_dir_config );
-			# Only check ownership for "ownership_only" matches
-			} elsif ( $directory_config->{'allow_specials'} and _is_ownership_only ( $site_config, $site_dir, $this_dir ) ) {
+			# Only check ownership for "ignore_permissions" matches
+			} elsif ( $directory_config->{'allow_specials'} and _is_ignore_permissions ( $site_config, $site_dir, $this_dir ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { do_not_check_mode => 1 } );
 			# Open folders for site
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_config->{'open_folders'} ) ) {
+			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_config->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
 			# Open folders for site type
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_type->{'open_folders'} ) ) {
+			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_type->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
 			# Everything else
 			} else {
@@ -306,24 +306,24 @@ sub process_site_directory {
 		}, sub {
 			# Files
 			my $this_file = shift;
-			# Only check ownership for "ownership_only" matches
-			if ( $directory_config->{'allow_specials'} and _is_ownership_only ( $site_config, $site_dir, $this_file ) ) {
+			# Only check ownership for "ignore_permissions" matches
+			if ( $directory_config->{'allow_specials'} and _is_ignore_permissions ( $site_config, $site_dir, $this_file ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { do_not_check_mode => 1 } );
-			# Server files
-			# (check these first as they can be in open folders)
-			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_config->{'server_files'} ) ) {
+			# Server owned files
+			# (check these first as they can be in world writable dirs)
+			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_config->{'server_owned_files'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0644', user => '[web_server]', group => '[web_server]' } );
-			# Open folders for site
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_config->{'open_folders'} ) ) {
+			# World writable dirs for site
+			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_config->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
-			# Open folders for site type
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_type->{'open_folders'} ) ) {
+			# World writable dirs for site type
+			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_type->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
 			# Read only files for site
-			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_config->{'read_only'} ) ) {
+			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_config->{'read_only_files'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
 			# Read only files for site type
-			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_type->{'read_only'} ) ) {
+			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_type->{'read_only_files'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
 			# Everything else
 			} else {
@@ -432,7 +432,7 @@ sub _check_entity {
 	}
 }
 
-sub _keep_directory_empty {
+sub _prune_temp_directory {
 	my ( $directory, $callbacks ) = @_;
 	finddepth ( sub {
 		# Skip the directory being processed
@@ -442,7 +442,7 @@ sub _keep_directory_empty {
 			# rmdir will only remove empty directories
 			if ( rmdir ( $File::Find::name ) ) {
 				# Report back if the directory was deleted
-				&{$callbacks->{'keep_empty_deleted'}}($File::Find::name);
+				&{$callbacks->{'temp_dir_item_deleted'}}($File::Find::name);
 			}
 		# Only process files, anything else will be picked up as an unknown later
 		} elsif ( -f $File::Find::name ) {
@@ -453,25 +453,25 @@ sub _keep_directory_empty {
 				# Delete it
 				unlink $File::Find::name;
 				# Report back
-				&{$callbacks->{'keep_empty_deleted'}}($File::Find::name);
+				&{$callbacks->{'temp_dir_item_deleted'}}($File::Find::name);
 			}
 		}
 	}, $directory );
 }
 
-sub _is_ownership_only {
+sub _is_ignore_permissions {
 	my ( $site_config, $site_dir, $entity ) = @_;
-	foreach my $ownership_only ( @{$site_config->{'ownership_only'}} ) {
+	foreach my $ignore_permissions ( @{$site_config->{'ignore_permissions'}} ) {
 		# Directory match specified
-		if ( $ownership_only =~ m!/$! ) {
+		if ( $ignore_permissions =~ m!/$! ) {
 			return 1 if
 				# Directory match
-				$entity =~ m!^$site_dir$ownership_only! or
+				$entity =~ m!^$site_dir$ignore_permissions! or
 				# Exact directory match
-				"$entity/" =~ m!^$site_dir$ownership_only$!;
+				"$entity/" =~ m!^$site_dir$ignore_permissions$!;
 		# Exact match specified
 		} else {
-			return 1 if $entity =~ m!^$site_dir$ownership_only$!;
+			return 1 if $entity =~ m!^$site_dir$ignore_permissions$!;
 		}
 	}
 	return 0;
