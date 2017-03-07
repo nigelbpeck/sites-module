@@ -28,6 +28,14 @@ sub is_valid_site_dir {
 	return defined $self->{'config_data'}{'sites'}{$site_dir};
 }
 
+sub is_within_a_specials_dir {
+	my ( $self, $keep_empty ) = @_;
+	$keep_empty =~ m!^/([^/]+)/!;
+	return $self->{'config_data'}{'directory_structure'}{'directories'}{$1}{'allow_specials'}
+		? 1
+		: 0;
+}
+
 sub prepare_directory_reports {
 	my ( $self ) = @_;
 	my $report = '';
@@ -44,7 +52,7 @@ sub prepare_directory_report {
 		missing_optional_dir => sub {
 			$report .= "$_[0]: optional directory should be provided but isn't\n";
 		},
-		unspecified_optional_dir => sub {
+		unallocated_optional_dir => sub {
 			$report .= "$_[0]: optional directory shouldn't be provided but is (no further checking done on it)\n";
 		},
 		missing_required_dir => sub {
@@ -65,17 +73,65 @@ sub prepare_directory_report {
 		unknown_root_entry => sub {
 			$report .= "$_[0]: rogue entry found in site root\n";
 		},
+		keep_empty_deleted => sub {
+			$report .= "$_[0]: deleted from \"keep empty\" folder\n";
+		},
 	});
 	return $report;
 }
 
-sub take_actions {
-	my ( $self ) = @_;
-	
+sub lock_down {
+	my ( $self, $site_dir ) = @_;
+	my $report;
+	process_site_directory ( $self, $site_dir, {
+		missing_optional_dir => sub {
+			$report .= "$_[0]: optional directory should be provided but isn't\n";
+		},
+		unallocated_optional_dir => sub {
+			$report .= "$_[0]: optional directory shouldn't be provided but is (no further checking done on it)\n";
+		},
+		missing_required_dir => sub {
+			$report .= "$_[0]: required directory does not exist\n";
+		},
+		user_error => sub {
+			my ( $entity, $username_desc, $uid, $current_uid ) = @_;
+			chown $uid, -1, $entity or die "Failed to change user for $entity to $username_desc ($uid)";
+			$report .= "$entity: changed owner to $username_desc ($uid, was $current_uid)\n";
+		},
+		group_error => sub {
+			my ( $entity, $group_desc, $gid, $current_gid ) = @_;
+			chown -1, $gid, $entity or die "Failed to change group for $entity to $group_desc ($gid)";
+			$report .= "$entity: changed group to $group_desc ($gid, was $current_gid)\n";
+		},
+		mode_error => sub {
+			chmod oct("0$_[1]"), $_[0] or die "Failed to change mode for $_[0] to $_[1]";
+			$report .= "$_[0]: changed mode to $_[1] (was $_[2])\n";
+		},
+		unknown_entry => sub {
+			$report .= "$_[0]: neither file or directory, and nothing else allowed\n";
+		},
+		unknown_root_entry => sub {
+			$report .= "$_[0]: rogue entry found in site root\n";
+		},
+		keep_empty_deleted => sub {
+			$report .= "$_[0]: deleted from \"keep empty\" folder\n";
+		},
+	});
+	return $report;
 }
 
 sub process_site_directory {
 	my ( $self, $site_dir, $callbacks ) = @_;
+	# Easy access to config
+	my $config_data = $self->{'config_data'};
+	my $sites_config = $config_data->{'sites'};
+	my $directory_structure = $config_data->{'directory_structure'};
+	# The site, and site type, we are processing
+	my $site_config = $sites_config->{$site_dir};
+	my $site_type = $config_data->{'site_types'}{$site_config->{'type'}};
+	# Error if the directory is not known
+	die "Unknown site directory: $site_dir"
+		unless $site_config;
 	# Check the callbacks
 	die "Callbacks must be provided for this method to operate"
 		unless ref $callbacks eq 'HASH';
@@ -84,13 +140,14 @@ sub process_site_directory {
 		my $count = 0;
 		foreach ( qw(
 			missing_optional_dir
-			unspecified_optional_dir
+			unallocated_optional_dir
 			missing_required_dir
 			user_error
 			group_error
 			mode_error
 			unknown_entry
 			unknown_root_entry
+			keep_empty_deleted
 		) ) {
 			if ( ref $callbacks->{$_} eq 'CODE' ) {
 				# Keep a count of provided callbacks
@@ -104,12 +161,6 @@ sub process_site_directory {
 		die "No callbacks provided, this method needs callbacks to operate"
 			unless $count;
 	}
-	# Easy access to config
-	my $config_data = $self->{'config_data'};
-	my $sites_config = $config_data->{'sites'};
-	my $directory_structure = $config_data->{'directory_structure'};
-	# The site we are processing
-	my $site_config = $sites_config->{$site_dir};
 	# Check that only (potentially) allowed entries exist in root site folder
 	opendir(my $dh, $site_dir) or die "Can't opendir $site_dir: $!";
 	while ( readdir($dh) ) {
@@ -117,6 +168,24 @@ sub process_site_directory {
 			unless ( $directory_structure->{'directories'}{$_} or /^(?:\.{1,2})$/ );
 	}
 	closedir $dh;
+	# Process any "keep_empty" directories for the site type
+	# Delete any files more than a day old from them
+	# Delete any empty directories
+	if ( ref $site_type->{'keep_empty'} eq 'ARRAY' ) {
+		foreach my $keep_empty ( @{$site_type->{'keep_empty'}} ) {
+			# Check that it is within a directory that allows specials
+			die ( "$site_dir does not allow_specials for $keep_empty" )
+				unless is_within_a_specials_dir ( $self, $keep_empty );
+			# Shortcut for processing
+			my $keep_empty_dir = "$site_dir$keep_empty";
+			# Check carefully before deleting things
+			# Must be 3 levels deep
+			$keep_empty_dir =~ /^(\/[^\/]+){3,}$/
+				or die "Unsafe value found for keep_empty directory: '$keep_empty_dir'; refusing to 'find $keep_empty_dir -mindepth 1 -atime 1 -delete'";
+			# Carry out the deletions and report them
+			_keep_directory_empty ( $keep_empty_dir, $callbacks );
+		}
+	}
 	# Get root dir config
 	my $root_dir_config = {
 		d_mode => $directory_structure->{'d_mode'},
@@ -153,7 +222,7 @@ sub process_site_directory {
 				&{$callbacks->{'missing_optional_dir'}}($directory_path);
 				next;
 			} elsif ( not $provided and -d $directory_path ) {
-				&{$callbacks->{'unspecified_optional_dir'}}($directory_path);
+				&{$callbacks->{'unallocated_optional_dir'}}($directory_path);
 				next;
 			# If not provided, go to next directory
 			} elsif ( not $provided ) {
@@ -212,14 +281,14 @@ sub process_site_directory {
 			# Check the top level directory
 			if ( $this_dir eq $directory_path ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $top_level_dir_config );
-			# Within the .git directory, check ownership only
-			} elsif ( $directory_config->{'allow_specials'} and $this_dir =~ m!^$directory_path/\.git(?:$|/)! ) {
+			# Only check ownership for "ownership_only" matches
+			} elsif ( $directory_config->{'allow_specials'} and _is_ownership_only ( $site_config, $site_dir, $this_dir ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { do_not_check_mode => 1 } );
 			# Open folders for site
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_config->{'open_folders'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
 			# Open folders for site type
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $config_data->{'site_types'}{$site_config->{'type'}}{'open_folders'} ) ) {
+			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_type->{'open_folders'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
 			# Everything else
 			} else {
@@ -228,8 +297,8 @@ sub process_site_directory {
 		}, sub {
 			# Files
 			my $this_file = shift;
-			# Within the .git directory, check ownership only
-			if ( $directory_config->{'allow_specials'} and $this_file =~ m!^$directory_path/\.git(?:$|/)! ) {
+			# Only check ownership for "ownership_only" matches
+			if ( $directory_config->{'allow_specials'} and _is_ownership_only ( $site_config, $site_dir, $this_file ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { do_not_check_mode => 1 } );
 			# Server files
 			# (check these first as they can be in open folders)
@@ -239,13 +308,13 @@ sub process_site_directory {
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_config->{'open_folders'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
 			# Open folders for site type
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $config_data->{'site_types'}{$site_config->{'type'}}{'open_folders'} ) ) {
+			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_type->{'open_folders'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
 			# Read only files for site
 			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_config->{'read_only'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
 			# Read only files for site type
-			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $config_data->{'site_types'}{$site_config->{'type'}}{'read_only'} ) ) {
+			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_type->{'read_only'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
 			# Everything else
 			} else {
@@ -352,6 +421,51 @@ sub _check_entity {
 	if ( $gid != $check_gid ) {
 		&{$callbacks->{'group_error'}}($entity, $group_for_error, $check_gid, $gid);
 	}
+}
+
+sub _keep_directory_empty {
+	my ( $directory, $callbacks ) = @_;
+	finddepth ( sub {
+		# Skip the directory being processed
+		return if $File::Find::name eq $directory;
+		# Delete empty directories
+		if ( -d $File::Find::name ) {
+			# rmdir will only remove empty directories
+			if ( rmdir ( $File::Find::name ) ) {
+				# Report back if the directory was deleted
+				&{$callbacks->{'keep_empty_deleted'}}($File::Find::name);
+			}
+		# Only process files, anything else will be picked up as an unknown later
+		} elsif ( -f $File::Find::name ) {
+			# Get last accessed time
+			my $last_access_time = (stat($File::Find::name))[8];
+			# If it's more than 24 hours since the entity was accessed
+			if ( $last_access_time < ( time - 60 * 60 * 24 ) ) {
+				# Delete it
+				unlink $File::Find::name;
+				# Report back
+				&{$callbacks->{'keep_empty_deleted'}}($File::Find::name);
+			}
+		}
+	}, $directory );
+}
+
+sub _is_ownership_only {
+	my ( $site_config, $site_dir, $entity ) = @_;
+	foreach my $ownership_only ( @{$site_config->{'ownership_only'}} ) {
+		# Directory match specified
+		if ( $ownership_only =~ m!/$! ) {
+			return 1 if
+				# Directory match
+				$entity =~ m!^$site_dir$ownership_only! or
+				# Exact directory match
+				"$entity/" =~ m!^$site_dir$ownership_only$!;
+		# Exact match specified
+		} else {
+			return 1 if $entity =~ m!^$site_dir$ownership_only$!;
+		}
+	}
+	return 0;
 }
 
 {
