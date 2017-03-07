@@ -45,6 +45,15 @@ sub prepare_directory_reports {
 	return $report;
 }
 
+sub lock_down_directories {
+	my ( $self ) = @_;
+	my $report = '';
+	foreach my $site_dir (sort keys %{$self->{'config_data'}{'sites'}}) {
+		$report .= lock_down_directory ( $self, $site_dir );
+	}
+	return $report;
+}
+
 sub prepare_directory_report {
 	my ( $self, $site_dir ) = @_;
 	my $report;
@@ -80,7 +89,7 @@ sub prepare_directory_report {
 	return $report;
 }
 
-sub lock_down {
+sub lock_down_directory {
 	my ( $self, $site_dir ) = @_;
 	my $report;
 	process_site_directory ( $self, $site_dir, {
