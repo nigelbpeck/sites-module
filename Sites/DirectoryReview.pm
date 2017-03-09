@@ -225,7 +225,7 @@ sub process_site_directory {
 					$provided = $option_default;
 				# Or error
 				} else {
-					die "$site_dir: unable to process '$option' option for $directory";
+					die "$site_dir: unable to process '$option' option for $directory (this could be resolved by setting 'optional_default' for the optional directory, otherwise each site needs to specify a choice for it)";
 				}
 			}
 			# Check the status of the optional directory is valid
