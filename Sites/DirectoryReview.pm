@@ -187,6 +187,8 @@ sub process_site_directory {
 				unless is_within_a_specials_dir ( $self, $temp_dir );
 			# Shortcut for processing
 			my $temp_dir_path = "$site_dir$temp_dir";
+			# Check that it exists
+			next unless -d $temp_dir_path;
 			# Check carefully before deleting things
 			# Must be 3 levels deep
 			$temp_dir_path =~ /^(\/[^\/]+){3,}$/
