@@ -187,6 +187,8 @@ sub process_site_directory {
 				unless is_within_a_specials_dir ( $self, $temp_dir );
 			# Shortcut for processing
 			my $temp_dir_path = "$site_dir$temp_dir";
+			# Check that it exists
+			next unless -d $temp_dir_path;
 			# Check carefully before deleting things
 			# Must be 3 levels deep
 			$temp_dir_path =~ /^(\/[^\/]+){3,}$/
@@ -223,7 +225,7 @@ sub process_site_directory {
 					$provided = $option_default;
 				# Or error
 				} else {
-					die "$site_dir: unable to process '$option' option for $directory";
+					die "$site_dir: unable to process '$option' option for $directory (this could be resolved by setting 'optional_default' for the optional directory, otherwise each site needs to specify a choice for it)";
 				}
 			}
 			# Check the status of the optional directory is valid
@@ -291,12 +293,12 @@ sub process_site_directory {
 			if ( $this_dir eq $directory_path ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $top_level_dir_config );
 			# Only check ownership for "ignore_permissions" matches
-			} elsif ( $directory_config->{'allow_specials'} and _is_ignore_permissions ( $site_config, $site_dir, $this_dir ) ) {
+			} elsif ( $directory_config->{'allow_specials'} and _should_ignore_permissions ( $site_config, $site_dir, $this_dir ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { do_not_check_mode => 1 } );
-			# Open folders for site
+			# World writable dirs for site
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_config->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
-			# Open folders for site type
+			# World writable dirs for site type
 			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_type->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
 			# Everything else
@@ -307,7 +309,7 @@ sub process_site_directory {
 			# Files
 			my $this_file = shift;
 			# Only check ownership for "ignore_permissions" matches
-			if ( $directory_config->{'allow_specials'} and _is_ignore_permissions ( $site_config, $site_dir, $this_file ) ) {
+			if ( $directory_config->{'allow_specials'} and _should_ignore_permissions ( $site_config, $site_dir, $this_file ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { do_not_check_mode => 1 } );
 			# Server owned files
 			# (check these first as they can be in world writable dirs)
@@ -459,7 +461,7 @@ sub _prune_temp_directory {
 	}, $directory );
 }
 
-sub _is_ignore_permissions {
+sub _should_ignore_permissions {
 	my ( $site_config, $site_dir, $entity ) = @_;
 	foreach my $ignore_permissions ( @{$site_config->{'ignore_permissions'}} ) {
 		# Directory match specified
