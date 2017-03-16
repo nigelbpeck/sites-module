@@ -18,13 +18,14 @@ use strict;
 use warnings;
 use utf8;
 
-use FindBin qw($RealBin);
+#use FindBin qw($RealBin);
 use File::Basename qw(dirname);
 use JSON::PP qw(decode_json);
 use JSON::Validator qw();
 use File::Find qw(find);
+use Scalar::Util qw(tainted);
 
-use constant SITES_SCHEMA => dirname($RealBin) . "/sites-schema/sites-schema.json";
+use constant SITES_SCHEMA => "/home/nigel/scripts/sites-schema/sites-schema.json";
 use constant DEFAULT_CONFIG_DATA_FILE => "/etc/sites/sites.json";
 
 # Attributes
@@ -96,6 +97,11 @@ sub _prepare {
 sub _slurp_file {
 	my $file = shift;
 	return do {
+		#$file =~ m!^(/[/a-zA-Z0-9._-]+)$!
+		#	or die "Dangerous value for \$file: $file";
+		die "\$file is tainted"
+			if tainted ( $file );
+		#$file = $1;
 		open ( my $fh, "<:encoding(UTF-8)", $file )
 			or die "Failed to open file: $file";
 		local $/;
