@@ -292,43 +292,70 @@ sub process_site_directory {
 			# Check the top level directory
 			if ( $this_dir eq $directory_path ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $top_level_dir_config );
+			}
+			# Exact Match World Writable Directories for site
+			# (so they don't get caught by server owned check)
+            elsif ( $directory_config->{'allow_specials'} and _entity_is_listed ( $this_dir, $site_dir, $site_config->{'world_writable_dirs'} ) ) {
+                _check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
+            }
+	        # Exact Match World Writable Directories for site type
+			# (so they don't get caught by server owned check)
+			elsif ( $directory_config->{'allow_specials'} and _entity_is_listed ( $this_dir, $site_dir, $site_type->{'world_writable_dirs'} ) ) {
+                _check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
+            }
+			# Server owned files (can now be containing directories or files themselves)
+            # (check these first as they can be in world writable dirs)
+            elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_config->{'server_owned_files'} ) ) {
+                my $d_mode = '0755';
+                _check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => $d_mode, user => '[web_server]', group => '[web_server]' } );
+            }
 			# Only check ownership for "ignore_permissions" matches
-			} elsif ( $directory_config->{'allow_specials'} and _should_ignore_permissions ( $site_config, $site_dir, $this_dir ) ) {
+			elsif ( $directory_config->{'allow_specials'} and _should_ignore_permissions ( $site_config, $site_dir, $this_dir ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { do_not_check_mode => 1 } );
+			}
 			# World writable dirs for site
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_config->{'world_writable_dirs'} ) ) {
+			elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_config->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
+			}
 			# World writable dirs for site type
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_type->{'world_writable_dirs'} ) ) {
+			elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_dir, $site_dir, $site_type->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config, { d_mode => '0777' } );
+			}
 			# Everything else
-			} else {
+			else {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_dir, $internal_dir_config );
 			}
 		}, sub {
 			# Files
 			my $this_file = shift;
+			# Server owned files (can now be containing directories or files themselves)
+            # (check these first as they can be in world writable dirs)
+            if ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_config->{'server_owned_files'} ) ) {
+            	my $f_mode = '0644';
+			    _check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => $f_mode, user => '[web_server]', group => '[web_server]' } );
+			}
 			# Only check ownership for "ignore_permissions" matches
-			if ( $directory_config->{'allow_specials'} and _should_ignore_permissions ( $site_config, $site_dir, $this_file ) ) {
+			elsif ( $directory_config->{'allow_specials'} and _should_ignore_permissions ( $site_config, $site_dir, $this_file ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { do_not_check_mode => 1 } );
-			# Server owned files
-			# (check these first as they can be in world writable dirs)
-			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_config->{'server_owned_files'} ) ) {
-				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0644', user => '[web_server]', group => '[web_server]' } );
+			}
 			# World writable dirs for site
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_config->{'world_writable_dirs'} ) ) {
+			elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_config->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
+			}
 			# World writable dirs for site type
-			} elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_type->{'world_writable_dirs'} ) ) {
+			elsif ( $directory_config->{'allow_specials'} and _containing_folder_is_listed ( $this_file, $site_dir, $site_type->{'world_writable_dirs'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0666' } );
+			}
 			# Read only files for site
-			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_config->{'read_only_files'} ) ) {
+			elsif ( $directory_config->{'allow_specials'} and _entity_is_listed ( $this_file, $site_dir, $site_config->{'read_only_files'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
+			}
 			# Read only files for site type
-			} elsif ( $directory_config->{'allow_specials'} and _file_is_listed ( $this_file, $site_dir, $site_type->{'read_only_files'} ) ) {
+			elsif ( $directory_config->{'allow_specials'} and _entity_is_listed ( $this_file, $site_dir, $site_type->{'read_only_files'} ) ) {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config, { f_mode => '0444' } );
+			}
 			# Everything else
-			} else {
+			else {
 				_check_entity ( $config_data, $callbacks, $site_dir, $this_file, $internal_dir_config );
 			}
 		});
@@ -526,7 +553,7 @@ sub _containing_folder_is_listed {
 	return 0;
 }
 
-sub _file_is_listed {	  
+sub _entity_is_listed {
 	my ( $file, $root_folder, $list_to_check ) = @_;
 	foreach ( @$list_to_check ) {
 		return 1 if $file eq "${root_folder}$_";
